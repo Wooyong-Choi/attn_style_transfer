@@ -7,6 +7,7 @@ from onmt.encoders import RNNEncoder
 from utils import sequence_mask
 
 class Classifier(nn.Module):
+    
     def __init__(self, emb_size, vocab_size, rnn_size,
                  attn_dim, attn_hops, classifier_dim,
                  padding_idx=0, fc_init_range=0.1, pretrained_word_vec=None):
