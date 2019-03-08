@@ -20,7 +20,7 @@ class Classifier(nn.Module):
             dropout=0
         )
         encoder = RNNEncoder(
-            rnn_type="LSTM",
+            rnn_type="GRU",
             bidirectional=True,
             num_layers=1,
             hidden_size=rnn_size,
@@ -40,14 +40,15 @@ class Classifier(nn.Module):
         self.w_cls = nn.Linear(rnn_size * attn_hops, classifier_dim)
         self.w_out = nn.Linear(classifier_dim, 2)
         
+        # Initialize weights
         self.w_s1.weight.data.uniform_(-fc_init_range, fc_init_range)
         self.w_s2.weight.data.uniform_(-fc_init_range, fc_init_range)
         
-    def forward(self, src, lengths, reverse=False):
+    def forward(self, src, lengths):
         _, memory_bank, _ = self.encoder(src[1:], lengths)
         
         # 안에서 masking하므로 상관없음 1은 sos, -1은 pad or eos
-        output, w_score = self._attn_word(src[1:-1], memory_bank, lengths, reverse)
+        output, w_score = self._attn_word(src[1:-1], memory_bank, lengths)
         
         output = output.view(output.size(0), -1)
         output = torch.tanh(self.w_cls(output))
@@ -55,12 +56,15 @@ class Classifier(nn.Module):
         
         return cls, w_score
     
-    def encode(self, src, lengths, reverse=False):
+    def encode(self, src, lengths, reverse=True):
         _, memory_bank, _ = self.encoder(src[1:], lengths)
-        output, w_score = self._attn_word(src[1:-1], memory_bank, lengths, reverse)        
-        return output, w_score
+        
+        output, w_score = self._attn_word(src[1:-1], memory_bank, lengths, reverse)
+        output = output.transpose(0, 1)
+        return output, memory_bank, w_score
+        
     
-    def _attn_word(self, src, mem_bank, lengths, reverse):
+    def _attn_word(self, src, mem_bank, lengths, reverse=False):
         src_len, batch_size, hidden_size = mem_bank.size()
         
         mem_bank = mem_bank.transpose(0, 1).contiguous()
@@ -80,11 +84,12 @@ class Classifier(nn.Module):
         align = torch.softmax(align.view(-1, src_len), dim=-1)
         align = align.view(batch_size, self.attn_hops, src_len)
         
+        mem_bank = mem_bank.view(batch_size, src_len, hidden_size)
+        
         if reverse:
             align = self.attn_hops-align
             align = align.masked_fill_(1-mask, float("-inf"))
             align = torch.softmax(align.view(-1, src_len), dim=-1)
             align = align.view(batch_size, self.attn_hops, src_len) # [bsz, hop, len]
          
-        mem_bank = mem_bank.view(batch_size, src_len, hidden_size)
         return torch.bmm(align, mem_bank), align
